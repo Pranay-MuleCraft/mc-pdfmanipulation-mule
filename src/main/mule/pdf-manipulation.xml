@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:java="http://www.mulesoft.org/schema/mule/java"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd 
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/java http://www.mulesoft.org/schema/mule/java/current/mule-java.xsd">
+	<file:config name="File_Config" doc:name="File Config"
+		doc:id="2321dcbe-0275-4d46-9817-852220a28f53" />
+	<http:listener-config name="HTTP_Listener_config"
+		doc:name="HTTP Listener config"
+		doc:id="a61c84e4-8279-41e8-8963-07ff3d4a284c">
+		<http:listener-connection host="0.0.0.0"
+			port="8081" />
+	</http:listener-config>
+	<flow name="split-each-pageFlow" doc:id="652023ca-d770-4476-b2e0-793bb776ee6b" >
+		<http:listener doc:name="Listener" doc:id="e4491068-ee80-4e70-8c81-93e6cfd87726" config-ref="HTTP_Listener_config" path="/split-each-page"/>
+		<logger level="INFO" doc:name="Logger" doc:id="3980daa2-f5ba-4e6d-9336-acc5dd38ac2f" message="#[payload]"/>
+		<java:invoke-static doc:name="Invoke static" doc:id="75ead2dc-07f6-4b1d-8379-67bdd4c610d1" class="com.pdfmanipulation.javamodule.SplitEachPage" method="split(java.lang.String,java.lang.String)">
+			<java:args ><![CDATA[#[%dw 2.0
+output application/java
+---
+{
+inputPdfPath:payload.inputPath,
+outputDir:payload.outputPattern
+}]]]></java:args>
+		</java:invoke-static>
+		<logger level="INFO" doc:name="Logger" doc:id="958b3647-97a2-4e82-b1bf-797fd2b87565" message="#[payload]"/>
+	</flow>
+	<flow name="read-pdf-as-binaryFlow" doc:id="6eeedbef-3a43-4865-94c5-60dd66eade68">
+		<http:listener doc:name="Listener" doc:id="df78adf6-e997-47a4-a5d0-917f0bf5bfbd" config-ref="HTTP_Listener_config" path="/read-as-binary" />
+
+		<set-variable value="#[payload.splitPoints]" doc:name="Set Variable" doc:id="d89ee51a-a0c2-4f35-93ce-4f34c447e365" variableName="splitPoints" />
+
+		<file:read doc:name="Read" doc:id="ec2b92ae-080d-495f-831e-d061391231fc" path="C:/Users/Pranay Raj/Desktop/A/sample_15_pages.pdf" />
+
+		<java:invoke-static doc:name="Invoke static" doc:id="1a185a54-d8dd-44da-8dee-059113304aa2" class="com.pdfmanipulation.javamodule.ReadAsBinary" method="pdfSplit(byte[],java.util.List)">
+			<java:args><![CDATA[#[%dw 2.0
+import * from dw::core::Binaries
+output application/java
+---
+{
+    fileContent: (payload as Binary),
+    splitPoints: vars.splitPoints as Array<Number> default [1]
+}]]]></java:args>
+		</java:invoke-static>
+
+		<foreach doc:name="For Each" doc:id="f916b96e-80c6-4809-8712-74df1ebc2805" collection="#[payload]">
+			<file:write doc:name="Write Split File" doc:id="be3d323c-f7d2-474a-9712-aafd62680a5b" path="#['C:/Users/Pranay Raj/Desktop/B/split_part_' ++ (vars.counter) ++ '.pdf']">
+			</file:write>
+		</foreach>
+	</flow>
+	<flow name="split-pdf-by-rangeFlow" doc:id="24e6ae6d-ff4a-4603-ae9a-99ee24d6138a">
+		
+		<file:listener doc:name="On New PDF" config-ref="File_Config" directory="C:\Users\Pranay Raj\Desktop\A" autoDelete="true" outputMimeType="application/pdf">
+			<scheduling-strategy >
+				<fixed-frequency/>
+			</scheduling-strategy>
+			<file:matcher filenamePattern="*.pdf" />
+		</file:listener>
+		
+		<set-variable value="#[3 as Number]" doc:name="Set Split Size" variableName="splitSize"/>
+
+		<java:invoke-static doc:name="Split PDF Java" 
+							class="com.pdfmanipulation.javamodule.PdfSplitByRange" method="splitPdf(java.io.InputStream,int)">
+			<java:args ><![CDATA[#[{
+	pdfContent: payload,
+	splitSize: vars.splitSize
+}]]]></java:args>
+		</java:invoke-static>
+
+		<foreach doc:name="For Each Split PDF" collection="#[payload]">
+			
+			<ee:transform doc:name="Calculate Filename">
+				<ee:message >
+				</ee:message>
+				<ee:variables >
+					<ee:set-variable variableName="fileName" ><![CDATA[%dw 2.0
+output application/java
+var startPage = ((vars.counter - 1) * vars.splitSize) + 1
+var endPage   = vars.counter * vars.splitSize
+---
+"pdfPage" ++ startPage ++ "-" ++ endPage ++ ".pdf"]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+
+			<file:write doc:name="Write Split File" config-ref="File_Config" path="#['C:/Users/Pranay Raj/Desktop/B/' ++ vars.fileName]"/>
+			
+		</foreach>
+	</flow>
+
+</mule>
+
+
+
+
